@@ -1,0 +1,244 @@
+# Input parameters needed or to be set on configuration time
+Parameters:
+  CustomRegion:
+    Description: "Enter region name (Ex. us-east-1)"
+    Type: String
+    Default: "us-east-1"
+  VPCName:
+    Description: "Enter the name of custom VPC"
+    Type: String
+  VPCRange:
+    Description: "Enter the CIDR of the custom VPC"
+    Type: String
+    Default: 10.0.0.0/24
+  PublicSubnet1Range:
+    Description: "Enter the CIDR range of the public subnet 1"
+    Type: String
+    Default: 10.0.0.0/27
+  PublicSubnet2Range:
+    Description: "Enter the CIDR range of the public subnet 2"
+    Type: String
+    Default: 10.0.0.32/27
+  PrivateSubnet1Range:
+    Description: "Enter the CIDR range of the private subnet 1"
+    Type: String
+    Default: 10.0.0.64/27
+  PrivateSubnet2Range:
+    Description: "Enter the CIDR range of the private subnet 2"
+    Type: String
+    Default: 10.0.0.96/27
+
+Resources:
+  VPCSetup:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCRange
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Ref VPCName
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPCSetup
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Ref PublicSubnet1Range
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join [" ", [!Ref VPCName, "public subnet AZ1"]]
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPCSetup
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Ref PublicSubnet2Range
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join [" ", [!Ref VPCName, "public  subnet AZ2"]]
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPCSetup
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Ref PrivateSubnet1Range
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join [" ", [!Ref VPCName, "private subnet AZ1"]]
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPCSetup
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Ref PrivateSubnet2Range
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join [" ", [!Ref VPCName, "private subnet AZ2"]]
+
+  IGWCreation:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join [" ", [!Ref VPCName, "internet gateway"]]
+
+  IGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref IGWCreation
+      VpcId: !Ref VPCSetup
+
+  PublicrouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPCSetup
+      Tags:
+        - Key: Name
+          Value: !Join [" ", [!Ref VPCName, "public route table"]]
+
+  AllocatePublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IGWAttachment
+    Properties:
+      RouteTableId: !Ref PublicrouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGWCreation
+
+  AssociatePublicSubnet1ToPublicrouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicrouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  AssociatePublicSubnet2ToPublicrouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicrouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: IGWAttachment
+    Properties:
+      Domain: vpc
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPCSetup
+      Tags:
+        - Key: Name
+          Value: !Join [" ", [!Ref VPCName, "private route table"]]
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  AssociatePrivateSubnet1ToPrivaterouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet1
+
+  AssociatePrivateSubnet2ToPrivaterouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet2
+
+  prod-web-servers-sg:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "This security group used by webservers"
+      VpcId: vpc-0848a814534cdafbe
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: "443"
+          ToPort: "443"
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: "Name"
+          Value: "prod-web-server-sg"
+
+  web-server-1:
+    Type: "AWS::EC2::Instance"
+    DependsOn: prod-web-servers-sg
+    Properties:
+      AvailabilityZone: us-east-1a
+      KeyName: key-01
+      ImageId: ami-09e67e426f25ce0d7
+      InstanceType: "t2.micro" #ec2-instance types
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 30
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref prod-web-servers-sg
+          SubnetId: !ImportValue PrivateSubnet1
+      Tags:
+        - Key: "Name"
+          Value: "webserver-1"
+
+  web-server-2:
+    Type: "AWS::EC2::Instance"
+    DependsOn: prod-web-servers-sg
+    Properties:
+      AvailabilityZone: us-east-1a
+      KeyName: key-02
+      ImageId: ami-09e67e426f25ce0d7
+      InstanceType: "t2.micro" #ec2-instance types
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 30
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "false"
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref prod-web-servers-sg
+          SubnetId: !ImportValue PrivateSubnet1
+      Tags:
+        - Key: "Name"
+          Value: "webserver-2"
+  loadbalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      IpAddressType: dualstack
+      LoadBalancerAttributes: 
+        - LoadBalancerAttribute
+      Name: network-load-balancer
+      Scheme: internet-facing
+      SubnetMappings: 
+       - !ImportValue PrivateSubnet1
+      Instances:
+        - !Ref web-server-1
+        - !Ref web-server-2
+      Listeners:
+      - LoadBalancerPort: '80'
+        InstancePort: '80'
+        Protocol: HTTP
+      Type: network
